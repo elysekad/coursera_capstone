@@ -23,4 +23,4 @@ Preprocessing:
 
 The app and data files need to be saved in the same folder in order for the app to run. 
 
-![Alt text](/screenshots/tree/master/coursera_capstone/app_example.PNG?raw=true)
+![Alt text](/screenshots/app_example.PNG?raw=true)
