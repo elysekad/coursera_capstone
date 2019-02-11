@@ -1,0 +1,163 @@
+---
+title: "capstone"
+author: "Elyse Kadokura"
+date: "December 17, 2018"
+output: html_document
+params: 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(quanteda)
+library(tm)
+library(caret)
+library(textclean)
+library(ngram)
+library(stringr)
+library(dplyr)
+```
+
+```{r}
+#CREATING SAMPLE
+setwd("C:/R_Studio/coursera/capstone/data/final/en_US")
+twitter <- readLines('en_US.twitter.txt', encoding="UTF-8",skipNul = TRUE,warn = FALSE)
+blogs <- readLines('en_US.blogs.txt', encoding="UTF-8",skipNul = TRUE,warn = FALSE)
+news <- readLines('en_US.news.txt', encoding="UTF-8",skipNul = TRUE,warn = FALSE)
+
+
+#getting sample of documents (.01, .03, .50)
+set.seed(1)
+twitter_sample <- sample(twitter, 50000)
+blogs_sample <- sample(blogs, 50000)
+news_sample <- sample(news, 50000)
+
+rm(twitter, blogs, news)
+```
+
+
+The twitter and blog data need a little extra cleaning than the other two datasets. I want to figure out a way to work with retweets and long hashtags. I also want to replace common abbreviations (omg, gf, bf, u, ya'll, im, r, n). While it's impossible to replace all of these, I want to clean up the most common. I also want to replace multiple explanation marks with one to make sentence splittin easier. 
+
+The first thing I want to do is figre out how to handle retweets. There are many common ways that retweets happen. If they're at the beginning of the tweet, I want to just replace them with "". However if they're not at the beginning of a tweet, these can usually be broken into two sentences. So I want to turn these into a '.', so these sentences will be split better. Retweets look like 'RT', 'RT:', or 'RT :'. 
+
+```{r}
+#replacing 'RT', 'RT:', 'RT :' at beginning of sentence with ''
+twitter_sample <- gsub('^RT\\s|^RT:\\s', '', twitter_sample)
+#replacing 'RT' in middle of tweets with '.'
+twitter_sample <- gsub('\\sRT\\s|\\sRT:\\s', '.', twitter_sample)
+
+```
+
+Now there are some things I want to do with both the twitter and blog data. I want to remove long hashtag that are a phrase with no spaces. Want to leave in hashtags that are just one word because these often fit into the sentence. This is not perfect, but gets rid of a good deal of noise. 
+```{r}
+#Removing all hashtags that are 11 characters or more. 
+twitter_blog <- list(twitter_sample, blogs_sample)
+twitter_blog <- lapply(twitter_blog, function(x) gsub('#\\w{11,}\\b', ' ', x))
+twitter_sample <- twitter_blog[[1]]
+blogs_sample <- twitter_blog[[2]]
+```
+
+I also want to replace common abbreviations (omg, gf, bf, u, ya'll, im, r, n). However, after investigating this a little bit, it's easier to do this after most punctuation and noise has been removed and text has been broken up into sentences. I also want to replace '$numeric' with 'dollaramount' as I think this will keep the meaning of the sentence intact. I also want to replace times (6:00pm, 8 am, 12:00) with "timestamp" as I believe this will also help preserve the meaning of a sentence. This will have to be done after most punctuation cleaning is done wo the brackets aren't removed
+```{r}
+bad_words <- read.csv('C:/R_Studio/coursera/capstone/bad_words.csv', header = FALSE, stringsAsFactors = FALSE)
+#creating training and test datasets for three text files
+#creating list of text samples
+samples <- list(twitter_sample, blogs_sample, news_sample)
+#lower case all letters
+samples <- lapply(samples, function(x) tolower(x))
+#removing non-english characters
+samples <- lapply(samples, function(x) iconv(x, "latin1", "ASCII", sub=""))
+#removing URLS from text data 
+samples <- lapply(samples, function(x) gsub("\\bhttp.*?\\b", " ", x))
+samples <- lapply(samples, function(x) gsub("\\b(www.).*?\\b", " ", x))
+
+#removing some punctuation. Leaving some in . ? ! to break up sentences, $ to tag prices, and : to tag times, and apostrophes)
+samples <- lapply(samples, function(x) gsub("(?![.?!':$&])[[:punct:]]", " ", x, perl=T))
+#removing apostrophes that are not within a word
+samples <- lapply(samples, function(x) gsub("(?<![a-z])[']|['](?![a-z])", " ", x, perl=T))
+#replacing times with string [timestamp]
+samples <- lapply(samples, function(x) gsub('\\b([0-9]|0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]', 'time_stamp ', x))
+samples <- lapply(samples, function(x) gsub('\\b([0-9]|0[0-9]|1[0-9]|2[0-3])[0-5][0-9](?=( am| pm|am|pm))', 'time_stamp ', x, perl = TRUE))
+samples <- lapply(samples, function(x) gsub('([0-9]|[1][0-2])(?=( am| pm|am|pm))', 'time_stamp ', x, perl=TRUE))
+
+#splitting text into sentences
+samples <- lapply(samples, function(x) unlist(strsplit(x, "(?<=[.!?])\\s(?=[a-z])", perl=T)))
+samples <- lapply(samples, function(x) gsub("[.?!:]", " ", x, perl=T))
+#replacing money with "[dollar amount]"
+samples <- lapply(samples, function(x) gsub('(\\s|^)\\$\\d.*?\\b', ' dollar_amount ', x))
+samples <- lapply(samples, function(x) gsub('\\$', '', x))
+#removing numbers
+samples <- lapply(samples, function(x) gsub('[0-9]+', ' ', x))
+
+#replacing abbreviations (omg, gf, bf, u, ya'll, im, r, n) 
+samples <- lapply(samples, function(x) gsub('\\bomg\\b', 'oh my god', x))
+samples <- lapply(samples, function(x) gsub('\\bgf\\b', 'girlfriend', x))
+samples <- lapply(samples, function(x) gsub('\\bbf\\b', 'boyfriend', x))
+samples <- lapply(samples, function(x) gsub('\\bu\\b', 'you', x))
+samples <- lapply(samples, function(x) gsub('(\\s|^)\\&\\s', ' and ', x))
+samples <- lapply(samples, function(x) gsub('\\&', ' ', x))
+samples <- lapply(samples, function(x) gsub('\\bya\'ll\\b', 'you all', x))
+samples <- lapply(samples, function(x) gsub('\\bim\\b', 'i\'m', x))
+samples <- lapply(samples, function(x) gsub('\\br\\b', 'are', x))
+samples <- lapply(samples, function(x) gsub('\\bn\\b', 'and', x))
+
+#removing extra white space and leading and trailing white spaces
+samples <- lapply(samples, function(x) trimws(x, which = c("both")))
+samples <- lapply(samples, function(x) gsub("\\s+", " ", x))
+
+#remove bad words
+samples <- lapply(samples, function(x) removeWords(x, bad_words[[1]]))
+
+#remove extra spaces (extra spaces between words and extra spaces at the beginning and end of sentences)
+samples <- lapply(samples, function(x) gsub("\\s+"," ",x))
+samples <- lapply(samples, function (x) gsub("^\\s+|\\s+$", "", x))
+
+#removing all items with less than two words
+samples <- lapply(samples, function(x) x[sapply(x, function(y) wordcount(y))>1] )
+
+train_test <- lapply(samples, function(x) {
+               set.seed(4650)
+               n = floor(0.8*length(x))
+               train_ind = sample(seq_along(x), size = n);
+               list(x[train_ind], x[-train_ind])
+               })
+
+train_list <- list(train_test[[1]][[1]], train_test[[2]][[1]], train_test[[3]][[1]])
+test_list <- list(train_test[[1]][[2]], train_test[[2]][[2]], train_test[[3]][[2]])
+
+rm(blogs_sample, twitter_sample, news_sample, train_test)
+
+```
+
+```{r}
+data <- unlist(train_list)
+
+getNgramFreqs <- function(ng, data) {
+  dfm_data <- dfm(data, ngrams=ng, what = "fasterword", verbose = FALSE)
+  ngram_freq <- as.data.frame(docfreq(dfm_data))
+  setDT(ngram_freq, keep.rownames = TRUE)
+  colnames(ngram_freq) <- c('ngram', 'freq')
+  ngram_freq <- ngram_freq[order(-ngram_freq$freq),]
+  return(ngram_freq)
+}
+
+unigrams <- getNgramFreqs(1, data)
+bigrams <- getNgramFreqs(2, data)
+trigrams <- getNgramFreqs(3, data)
+
+setwd("C:/R_Studio/coursera/capstone/shiny_app/word_prediction")
+saveRDS(unigrams, 'unigrams.Rda')
+saveRDS(bigrams, 'bigrams.Rda')
+saveRDS(trigrams, 'trigrams.Rda')
+```
+
+
+
+
+
+
+
+
+
+
+
+
