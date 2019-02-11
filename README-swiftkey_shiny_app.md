@@ -23,4 +23,4 @@ Preprocessing:
 
 The app and data files need to be saved in the same folder in order for the app to run. 
 
-![Alt text](/screenshots/app_example.PNG?raw=true)
+![Alt text](/screenshot/app_example.PNG?raw=true)
